@@ -5,111 +5,86 @@ import plotly.graph_objects as go
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
-st.title("就活・企業分析ダッシュボード")
+# ページ全体の設定（タイトルバーやレイアウト）
+st.set_page_config(page_title="企業分析ボード", layout="wide")
 
-# --- 企業名とコードの対応リスト ---
+# カスタムCSSでデザインをさらに凝る
+st.markdown("""
+    <style>
+    .main { background-color: #f8f9fa; }
+    .stButton>button { width: 100%; border-radius: 10px; height: 3em; background-color: #0068c9; color: white; }
+    .metric-card { background-color: white; padding: 15px; border-radius: 10px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); }
+    </style>
+    """, unsafe_allow_html=True)
+
+st.title("🚀 企業分析ダッシュボード")
+
+# --- 入力セクション（メイン画面の上部に配置） ---
 COMPANY_LIST = {
-    "ソニーグループ": "6758",
-    "トヨタ自動車": "7203",
-    "任天堂": "7974",
-    "ソフトバンクグループ": "9984",
-    "キーエンス": "6861",
-    "ファーストリテイリング": "9983",
-    "リクルートHD": "6098",
-    "三菱UFJフィナンシャルG": "8306"
+    "ソニーグループ": "6758", "トヨタ自動車": "7203", "任天堂": "7974",
+    "ソフトバンクG": "9984", "キーエンス": "6861", "三菱UFJ": "8306"
 }
 
-st.sidebar.header("企業選択")
-selected_company = st.sidebar.selectbox("主要企業から選ぶ", ["直接入力"] + list(COMPANY_LIST.keys()))
+col_in1, col_in2 = st.columns([2, 1])
+with col_in1:
+    selected_company = st.selectbox("企業を選択", ["直接入力"] + list(COMPANY_LIST.keys()))
+with col_in2:
+    if selected_company == "直接入力":
+        ticker_input = st.text_input("証券コード", "6758")
+    else:
+        ticker_input = COMPANY_LIST[selected_company]
 
-if selected_company == "直接入力":
-    ticker_input = st.sidebar.text_input("証券コードを入力（4桁）", "6758")
-else:
-    ticker_input = COMPANY_LIST[selected_company]
-
-ticker = f"{ticker_input}.T"
-
-if st.button("分析開始"):
+# 分析開始ボタンを中央にドカンと配置
+if st.button("🔥 分析を実行する"):
+    ticker = f"{ticker_input}.T"
     try:
-        with st.spinner('データを取得中...'):
+        with st.spinner('データを解析中...'):
             company = yf.Ticker(ticker)
             income_stmt = company.financials
             balance_sheet = company.balance_sheet
             
-            if income_stmt is None or income_stmt.empty or balance_sheet is None or balance_sheet.empty:
-                st.error("財務データが取得できませんでした。")
-            else:
-                # --- 指標計算（鉄壁バージョン） ---
-                def get_val(df, keys):
-                    for k in keys:
-                        if k in df.index:
-                            return df.loc[k]
-                    return None
+            # --- 指標計算（鉄壁版を凝縮） ---
+            def get_val(df, keys):
+                for k in keys:
+                    if k in df.index: return df.loc[k]
+                return None
 
-                rev_data = get_val(income_stmt, ['Total Revenue', 'Operating Revenue'])
-                op_inc_data = get_val(income_stmt, ['Operating Income', 'Pretax Income'])
+            rev_data = get_val(income_stmt, ['Total Revenue', 'Operating Revenue'])
+            op_inc_data = get_val(income_stmt, ['Operating Income', 'Pretax Income'])
+            
+            # 各種計算（エラー回避込）
+            op_margin = (op_inc_data.iloc[0] / rev_data.iloc[0] * 100) if rev_data is not None else 0
+            
+            equity_data = get_val(balance_sheet, ['Stockholders Equity', 'Total Equity'])
+            assets_data = get_val(balance_sheet, ['Total Assets'])
+            equity_ratio = (equity_data.iloc[0] / assets_data.iloc[0] * 100) if equity_data is not None else 0
+            
+            rev_series = rev_data.sort_index(ascending=True)
+            X = np.arange(len(rev_series)).reshape(-1, 1)
+            y = rev_series.values
+            trend_ratio = (LinearRegression().fit(X, y).coef_[0] / rev_series.mean() * 100)
 
-                if rev_data is not None and op_inc_data is not None:
-                    rev = rev_data.iloc[0]
-                    op_inc = op_inc_data.iloc[0]
-                    op_margin = (op_inc / rev) * 100
-                else:
-                    op_margin = 0
-
-                equity_data = get_val(balance_sheet, ['Stockholders Equity', 'Total Equity'])
-                assets_data = get_val(balance_sheet, ['Total Assets'])
-
-                if equity_data is not None and assets_data is not None:
-                    equity = equity_data.iloc[0]
-                    total_assets = assets_data.iloc[0]
-                    equity_ratio = (equity / total_assets) * 100
-                else:
-                    equity_ratio = 0
-
-                if rev_data is not None:
-                    rev_series = rev_data.sort_index(ascending=True)
-                    X = np.arange(len(rev_series)).reshape(-1, 1)
-                    y = rev_series.values
-                    model = LinearRegression().fit(X, y)
-                    trend_ratio = (model.coef_[0] / rev_series.mean()) * 100
-                else:
-                    trend_ratio = 0
-
-                # --- グラフ表示 ---
+            # --- メインレイアウト ---
+            col_graph, col_stats = st.columns([1.5, 1])
+            
+            with col_graph:
                 scores = [max(0, min(100, op_margin * 5)), max(0, min(100, equity_ratio * 2)), max(0, min(100, 50 + trend_ratio * 5))]
-                categories = ['収益性 (利益率)', '安全性 (比率)', '成長性 (トレンド)']
-                fig = go.Figure(data=go.Scatterpolar(r=scores + [scores[0]], theta=categories + [categories[0]], fill='toself'))
-                fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])))
-                st.plotly_chart(fig)
-                
-                # --- 🔍 追加した解説と診断セクション ---
-                st.divider()
-                st.subheader("🔍 指標の解説と診断結果")
+                categories = ['収益性', '安全性', '成長性']
+                fig = go.Figure(data=go.Scatterpolar(r=scores + [scores[0]], theta=categories + [categories[0]], fill='toself', fillcolor='rgba(0, 104, 201, 0.2)', line=dict(color='#0068c9')))
+                fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), height=400, margin=dict(l=40, r=40, t=20, b=20))
+                st.plotly_chart(fig, use_container_width=True)
 
-                with st.expander("各評価軸の概要を確認する"):
-                    st.write("""
-                    - **収益性**: 効率よく稼げているか。10%超で優良。
-                    - **安全性**: 倒産しにくさ。40%以上で安定。
-                    - **成長性**: 売上の伸び。プラスなら拡大中。
-                    """)
+            with col_stats:
+                st.write("#### 📊 経営指標")
+                st.metric("営業利益率", f"{op_margin:.1f}%")
+                st.metric("自己資本比率", f"{equity_ratio:.1f}%")
+                st.metric("成長トレンド", f"{trend_ratio:.1f}%")
 
-                diagnosis = ""
-                advice = ""
-                if op_margin > 20 and equity_ratio > 40:
-                    diagnosis = "💎 高収益・盤石モデル"
-                    advice = "独自の強みがある超優良企業です。"
-                elif trend_ratio > 10:
-                    diagnosis = "🚀 積極成長型"
-                    advice = "勢いがあります。変化を楽しめる人向け。"
-                elif equity_ratio > 70:
-                    diagnosis = "🛡️ 鉄壁・超安定型"
-                    advice = "財務が非常に健全で、長く働ける環境です。"
-                else:
-                    diagnosis = "⚖️ バランス型"
-                    advice = "標準的な状況です。社風などを深掘りしましょう。"
-
-                st.info(f"**【総合診断】 {diagnosis}**")
-                st.success(f"**💡 就活アドバイス:** {advice}")
+            # --- 診断セクション ---
+            st.divider()
+            diag = "💎 高収益・盤石型" if op_margin > 20 and equity_ratio > 40 else "🚀 成長優先型" if trend_ratio > 10 else "⚖️ バランス型"
+            st.info(f"### 総合診断: {diag}")
+            st.write(f"**就活アドバイス:** この企業は業界内でも{diag}の特徴が強く出ています。自分のキャリア観と照らし合わせてみましょう。")
 
     except Exception as e:
-        st.error(f"分析中にエラーが発生しました: {e}")
+        st.error(f"分析失敗: 証券コード {ticker_input} のデータを読み込めませんでした。({e})")
