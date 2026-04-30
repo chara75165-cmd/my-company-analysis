@@ -44,27 +44,47 @@ if st.button("分析開始"):
             if income_stmt is None or income_stmt.empty or balance_sheet is None or balance_sheet.empty:
                 st.error("財務データが取得できませんでした。時間をおいて試すか、別のコードを入力してください。")
             else:
-                # --- 指標計算（項目名を柔軟に取得） ---
-                # 収益性：営業利益 / 売上高
-                op_inc = income_stmt.loc['Operating Income'].iloc[0]
-                rev = income_stmt.loc['Total Revenue'].iloc[0]
-                op_margin = (op_inc / rev) * 100
+               # --- 指標計算（鉄壁バージョン） ---
+try:
+    # 項目名を探す補助関数
+    def get_val(df, keys):
+        for k in keys:
+            if k in df.index:
+                return df.loc[k]
+        return None
 
-                # 安全性：自己資本 / 総資産
-                # 項目名が微妙に違う場合があるため、キーワードで探す工夫
-                equity_key = [k for k in balance_sheet.index if 'Stockholders Equity' in k][0]
-                assets_key = [k for k in balance_sheet.index if 'Total Assets' in k][0]
-                
-                equity = balance_sheet.loc[equity_key].iloc[0]
-                total_assets = balance_sheet.loc[assets_key].iloc[0]
-                equity_ratio = (equity / total_assets) * 100
+    # 1. 収益性（売上高または経常収益を取得）
+    rev_data = get_val(income_stmt, ['Total Revenue', 'Operating Revenue'])
+    op_inc_data = get_val(income_stmt, ['Operating Income', 'Pretax Income']) # 銀行等は税引前利益で代用
 
-                # 成長性：売上の回帰分析
-                rev_series = income_stmt.loc['Total Revenue'].sort_index(ascending=True)
-                X = np.arange(len(rev_series)).reshape(-1, 1)
-                y = rev_series.values
-                model = LinearRegression().fit(X, y)
-                trend_ratio = (model.coef_[0] / rev_series.mean()) * 100
+    if rev_data is not None and op_inc_data is not None:
+        rev = rev_data.iloc[0]
+        op_inc = op_inc_data.iloc[0]
+        op_margin = (op_inc / rev) * 100
+    else:
+        op_margin = 0
+
+    # 2. 安全性（自己資本比率）
+    equity_data = get_val(balance_sheet, ['Stockholders Equity', 'Total Equity'])
+    assets_data = get_val(balance_sheet, ['Total Assets'])
+
+    if equity_data is not None and assets_data is not None:
+        equity = equity_data.iloc[0]
+        total_assets = assets_data.iloc[0]
+        equity_ratio = (equity / total_assets) * 100
+    else:
+        equity_ratio = 0
+
+    # 3. 成長性（回帰分析）
+    if rev_data is not None:
+        rev_series = rev_data.sort_index(ascending=True)
+        X = np.arange(len(rev_series)).reshape(-1, 1)
+        y = rev_series.values
+        model = LinearRegression().fit(X, y)
+        trend_ratio = (model.coef_[0] / rev_series.mean()) * 100
+    else:
+        trend_ratio = 0
+
 
                 # スコア化
                 scores = [
