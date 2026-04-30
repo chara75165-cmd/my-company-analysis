@@ -7,7 +7,7 @@ from sklearn.linear_model import LinearRegression
 
 st.set_page_config(page_title="企業分析・比較ボード", layout="wide")
 
-# --- 1. 業種別・企業リストの定義 ---
+# --- 1. 業種別・企業リスト（代表的な企業） ---
 INDUSTRY_MAP = {
     "自動車・輸送機器": {
         "トヨタ自動車": "7203", "ホンダ": "7267", "日産自動車": "7201", "デンソー": "6902"
@@ -27,7 +27,8 @@ INDUSTRY_MAP = {
     }
 }
 
-# --- 2. 共通関数（分析とUI） ---
+# --- 2. 共通関数（分析ロジック） ---
+@st.cache_data(ttl=3600) # 1時間はデータを保持して高速化
 def get_analysis(ticker_code):
     try:
         company = yf.Ticker(f"{ticker_code}.T")
@@ -57,6 +58,19 @@ def get_analysis(ticker_code):
     except:
         return None
 
+# --- 業界平均を計算する関数 ---
+@st.cache_data
+def get_industry_averages(industry_name):
+    if industry_name not in INDUSTRY_MAP: return None
+    comp_list = INDUSTRY_MAP[industry_name]
+    m_list, e_list, t_list = [], [], []
+    for name, code in comp_list.items():
+        res = get_analysis(code)
+        if res:
+            m_list.append(res[1]); e_list.append(res[2]); t_list.append(res[3])
+    if not m_list: return None
+    return sum(m_list)/len(m_list), sum(e_list)/len(e_list), sum(t_list)/len(t_list)
+
 def select_company_ui(key_suffix):
     col_a, col_b = st.columns(2)
     with col_a:
@@ -68,7 +82,7 @@ def select_company_ui(key_suffix):
         else:
             name = st.selectbox("企業を選択", list(INDUSTRY_MAP[industry].keys()), key=f"name_{key_suffix}")
             code = INDUSTRY_MAP[industry][name]
-    return code, name
+    return code, name, industry
 
 # --- 3. メインUI ---
 st.title("🚀 企業分析ダッシュボード")
@@ -76,9 +90,11 @@ tab1, tab2 = st.tabs(["🔍 1社じっくり分析", "⚔️ ライバル比較"
 
 with tab1:
     st.subheader("分析する企業")
-    t_code, t_name = select_company_ui("single")
+    t_code, t_name, t_ind = select_company_ui("single")
     if st.button("🔥 分析を実行", key="s_btn"):
         res = get_analysis(t_code)
+        ind_avg = get_industry_averages(t_ind) # 業界平均を取得
+        
         if res:
             scores, margin, safety, trend = res
             col1, col2 = st.columns([1.5, 1])
@@ -87,14 +103,21 @@ with tab1:
                 fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), height=400)
                 st.plotly_chart(fig, use_container_width=True)
             with col2:
-                st.metric("営業利益率", f"{margin:.1f}%")
-                st.metric("自己資本比率", f"{safety:.1f}%")
-                st.metric("成長トレンド", f"{trend:.1f}%")
+                st.write(f"#### 📊 {t_ind}平均との比較")
+                if ind_avg:
+                    avg_m, avg_s, avg_t = ind_avg
+                    st.metric("営業利益率", f"{margin:.1f}%", f"{margin - avg_m:.1f}%")
+                    st.metric("自己資本比率", f"{safety:.1f}%", f"{safety - avg_s:.1f}%")
+                    st.metric("成長トレンド", f"{trend:.1f}%", f"{trend - avg_t:.1f}%")
+                else:
+                    st.metric("営業利益率", f"{margin:.1f}%")
+                    st.metric("自己資本比率", f"{safety:.1f}%")
+                    st.metric("成長トレンド", f"{trend:.1f}%")
 
 with tab2:
     st.subheader("比較する2社を選択")
-    c1_code, c1_name = select_company_ui("c1")
-    c2_code, c2_name = select_company_ui("c2")
+    c1_code, c1_name, _ = select_company_ui("c1")
+    c2_code, c2_name, _ = select_company_ui("c2")
     if st.button("⚔️ 比較を開始", key="c_btn"):
         res1, res2 = get_analysis(c1_code), get_analysis(c2_code)
         if res1 and res2:
@@ -107,7 +130,7 @@ with tab2:
                 fig.add_trace(go.Scatterpolar(r=s2+[s2[0]], theta=['収益性','安全性','成長性','収益性'], fill='toself', name=c2_name))
                 st.plotly_chart(fig, use_container_width=True)
             with col_m:
-                st.caption(f"※ {c1_name} の数値を表示 ( )内は相手との差分")
+                st.caption(f"※ {c1_name} を基準とした比較")
                 st.metric("利益率", f"{m1:.1f}%", f"{m1-m2:.1f}%")
                 st.metric("資本比率", f"{sa1:.1f}%", f"{sa1-sa2:.1f}%")
                 st.metric("成長率", f"{tr1:.1f}%", f"{tr1-tr2:.1f}%")
