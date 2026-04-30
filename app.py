@@ -7,62 +7,83 @@ from sklearn.linear_model import LinearRegression
 
 st.set_page_config(page_title="企業分析・比較ボード", layout="wide")
 
-# カスタムCSS（ボタンの色などを調整）
-st.markdown("""
-    <style>
-    .stTabs [data-baseweb="tab-list"] { gap: 24px; }
-    .stTabs [data-baseweb="tab"] { height: 50px; white-space: pre-wrap; font-size: 18px; }
-    </style>
-    """, unsafe_allow_html=True)
-
-st.title("📊 企業分析ダッシュボード")
-
-COMPANY_LIST = {
-    "ソニーグループ": "6758", "トヨタ自動車": "7203", "任天堂": "7974",
-    "ソフトバンクG": "9984", "キーエンス": "6861", "三菱UFJ": "8306", 
-    "パナソニック": "6752", "ホンダ": "7267", "楽天グループ": "4755"
+# --- 1. 業種別・企業リストの定義 ---
+INDUSTRY_MAP = {
+    "自動車・輸送機器": {
+        "トヨタ自動車": "7203", "ホンダ": "7267", "日産自動車": "7201", "デンソー": "6902"
+    },
+    "電機・精密・IT": {
+        "ソニーグループ": "6758", "パナソニック": "6752", "任天堂": "7974", "キーエンス": "6861",
+        "ソフトバンクG": "9984", "富士通": "6702", "日立製作所": "6501", "キヤノン": "7751"
+    },
+    "金融・保険": {
+        "三菱UFJ": "8306", "三井住友FG": "8316", "みずほFG": "8411", "東京海上HD": "8766"
+    },
+    "小売・サービス・飲食": {
+        "ファーストリテイリング": "9983", "セブン＆アイ": "3382", "リクルートHD": "6098", "オリエンタルランド": "4661"
+    },
+    "化学・医薬品": {
+        "武田薬品": "4502", "中外製薬": "4519", "信越化学": "4063", "花王": "4452"
+    }
 }
 
-# --- 分析用共通関数 ---
+# --- 2. 共通関数（分析とUI） ---
 def get_analysis(ticker_code):
-    company = yf.Ticker(f"{ticker_code}.T")
-    income = company.financials
-    balance = company.balance_sheet
-    if income.empty or balance.empty: return None
-    
-    def get_val(df, keys):
-        for k in keys:
-            if k in df.index: return df.loc[k]
+    try:
+        company = yf.Ticker(f"{ticker_code}.T")
+        income = company.financials
+        balance = company.balance_sheet
+        if income.empty or balance.empty: return None
+
+        def get_val(df, keys):
+            for k in keys:
+                if k in df.index: return df.loc[k]
+            return None
+
+        rev_data = get_val(income, ['Total Revenue', 'Operating Revenue'])
+        op_inc_data = get_val(income, ['Operating Income', 'Pretax Income'])
+        equity_data = get_val(balance, ['Stockholders Equity', 'Total Equity'])
+        assets_data = get_val(balance, ['Total Assets'])
+
+        op_margin = (op_inc_data.iloc[0] / rev_data.iloc[0] * 100)
+        equity_ratio = (equity_data.iloc[0] / assets_data.iloc[0] * 100)
+        rev_series = rev_data.sort_index(ascending=True)
+        X = np.arange(len(rev_series)).reshape(-1, 1)
+        y = rev_series.values
+        trend = (LinearRegression().fit(X, y).coef_[0] / rev_series.mean() * 100)
+        
+        scores = [max(0, min(100, op_margin * 5)), max(0, min(100, equity_ratio * 2)), max(0, min(100, 50 + trend * 5))]
+        return scores, op_margin, equity_ratio, trend
+    except:
         return None
 
-    rev_data = get_val(income, ['Total Revenue', 'Operating Revenue'])
-    op_inc_data = get_val(income, ['Operating Income', 'Pretax Income'])
-    equity_data = get_val(balance, ['Stockholders Equity', 'Total Equity'])
-    assets_data = get_val(balance, ['Total Assets'])
+def select_company_ui(key_suffix):
+    col_a, col_b = st.columns(2)
+    with col_a:
+        industry = st.selectbox("業種を選択", list(INDUSTRY_MAP.keys()) + ["直接入力"], key=f"ind_{key_suffix}")
+    with col_b:
+        if industry == "直接入力":
+            code = st.text_input("証券コードを入力", "6758", key=f"code_{key_suffix}")
+            name = code
+        else:
+            name = st.selectbox("企業を選択", list(INDUSTRY_MAP[industry].keys()), key=f"name_{key_suffix}")
+            code = INDUSTRY_MAP[industry][name]
+    return code, name
 
-    op_margin = (op_inc_data.iloc[0] / rev_data.iloc[0] * 100)
-    equity_ratio = (equity_data.iloc[0] / assets_data.iloc[0] * 100)
-    rev_series = rev_data.sort_index(ascending=True)
-    X = np.arange(len(rev_series)).reshape(-1, 1)
-    y = rev_series.values
-    trend = (LinearRegression().fit(X, y).coef_[0] / rev_series.mean() * 100)
-    
-    scores = [max(0, min(100, op_margin * 5)), max(0, min(100, equity_ratio * 2)), max(0, min(100, 50 + trend * 5))]
-    return scores, op_margin, equity_ratio, trend
-
-# --- メイン画面のタブ構成 ---
+# --- 3. メインUI ---
+st.title("🚀 企業分析ダッシュボード")
 tab1, tab2 = st.tabs(["🔍 1社じっくり分析", "⚔️ ライバル比較"])
 
-# --- Tab 1: 1社分析 ---
 with tab1:
-    c_single = st.selectbox("分析したい企業を選択", list(COMPANY_LIST.keys()), key="s_sel")
-    if st.button("分析を実行", key="s_btn"):
-        res = get_analysis(COMPANY_LIST[c_single])
+    st.subheader("分析する企業")
+    t_code, t_name = select_company_ui("single")
+    if st.button("🔥 分析を実行", key="s_btn"):
+        res = get_analysis(t_code)
         if res:
             scores, margin, safety, trend = res
             col1, col2 = st.columns([1.5, 1])
             with col1:
-                fig = go.Figure(data=go.Scatterpolar(r=scores + [scores[0]], theta=['収益性','安全性','成長性'] + ['収益性'], fill='toself', line=dict(color='#0068c9')))
+                fig = go.Figure(data=go.Scatterpolar(r=scores + [scores[0]], theta=['収益性','安全性','成長性','収益性'], fill='toself'))
                 fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), height=400)
                 st.plotly_chart(fig, use_container_width=True)
             with col2:
@@ -70,31 +91,23 @@ with tab1:
                 st.metric("自己資本比率", f"{safety:.1f}%")
                 st.metric("成長トレンド", f"{trend:.1f}%")
 
-# --- Tab 2: 2社比較 ---
 with tab2:
-    col_sel1, col_sel2 = st.columns(2)
-    with col_sel1: c1 = st.selectbox("企業 1 (基準)", list(COMPANY_LIST.keys()), index=0)
-    with col_sel2: c2 = st.selectbox("企業 2 (比較対象)", list(COMPANY_LIST.keys()), index=1)
-    
-    if st.button("比較を開始", key="c_btn"):
-        res1 = get_analysis(COMPANY_LIST[c1])
-        res2 = get_analysis(COMPANY_LIST[c2])
-        
+    st.subheader("比較する2社を選択")
+    c1_code, c1_name = select_company_ui("c1")
+    c2_code, c2_name = select_company_ui("c2")
+    if st.button("⚔️ 比較を開始", key="c_btn"):
+        res1, res2 = get_analysis(c1_code), get_analysis(c2_code)
         if res1 and res2:
-            scores1, m1, s1, t1 = res1
-            scores2, m2, s2, t2 = res2
-            
+            s1, m1, sa1, tr1 = res1
+            s2, m2, sa2, tr2 = res2
             col_g, col_m = st.columns([1.5, 1])
             with col_g:
                 fig = go.Figure()
-                fig.add_trace(go.Scatterpolar(r=scores1 + [scores1[0]], theta=['収益性','安全性','成長性'] + ['収益性'], fill='toself', name=c1, line=dict(color='#0068c9')))
-                fig.add_trace(go.Scatterpolar(r=scores2 + [scores2[0]], theta=['収益性','安全性','成長性'] + ['収益性'], fill='toself', name=c2, line=dict(color='#e63946')))
-                fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), height=450)
+                fig.add_trace(go.Scatterpolar(r=s1+[s1[0]], theta=['収益性','安全性','成長性','収益性'], fill='toself', name=c1_name))
+                fig.add_trace(go.Scatterpolar(r=s2+[s2[0]], theta=['収益性','安全性','成長性','収益性'], fill='toself', name=c2_name))
                 st.plotly_chart(fig, use_container_width=True)
-            
             with col_m:
-                st.write(f"#### 📊 {c1} のスコア")
-                st.caption(f"※ ( ) 内は {c2} との差分")
+                st.caption(f"※ {c1_name} の数値を表示 ( )内は相手との差分")
                 st.metric("利益率", f"{m1:.1f}%", f"{m1-m2:.1f}%")
-                st.metric("資本比率", f"{s1:.1f}%", f"{s1-s2:.1f}%")
-                st.metric("成長率", f"{t1:.1f}%", f"{t1-t2:.1f}%")
+                st.metric("資本比率", f"{sa1:.1f}%", f"{sa1-sa2:.1f}%")
+                st.metric("成長率", f"{tr1:.1f}%", f"{tr1-tr2:.1f}%")
