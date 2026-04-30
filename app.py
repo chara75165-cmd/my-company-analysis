@@ -5,35 +5,25 @@ import plotly.graph_objects as go
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
-st.set_page_config(page_title="企業分析・比較ボード", layout="wide")
+st.set_page_config(page_title="企業分析・人的資本ボード", layout="wide")
 
-# --- 1. 業種別・企業リスト（代表的な企業） ---
+# --- 1. 業種別・企業リスト ---
 INDUSTRY_MAP = {
-    "自動車・輸送機器": {
-        "トヨタ自動車": "7203", "ホンダ": "7267", "日産自動車": "7201", "デンソー": "6902"
-    },
-    "電機・精密・IT": {
-        "ソニーグループ": "6758", "パナソニック": "6752", "任天堂": "7974", "キーエンス": "6861",
-        "ソフトバンクG": "9984", "富士通": "6702", "日立製作所": "6501", "キヤノン": "7751"
-    },
-    "金融・保険": {
-        "三菱UFJ": "8306", "三井住友FG": "8316", "みずほFG": "8411", "東京海上HD": "8766"
-    },
-    "小売・サービス・飲食": {
-        "ファーストリテイリング": "9983", "セブン＆アイ": "3382", "リクルートHD": "6098", "オリエンタルランド": "4661"
-    },
-    "化学・医薬品": {
-        "武田薬品": "4502", "中外製薬": "4519", "信越化学": "4063", "花王": "4452"
-    }
+    "自動車・輸送機器": {"トヨタ自動車": "7203", "ホンダ": "7267", "日産自動車": "7201", "デンソー": "6902"},
+    "電機・精密・IT": {"ソニーグループ": "6758", "パナソニック": "6752", "任天堂": "7974", "キーエンス": "6861", "ソフトバンクG": "9984", "富士通": "6702", "日立製作所": "6501", "キヤノン": "7751"},
+    "金融・保険": {"三菱UFJ": "8306", "三井住友FG": "8316", "みずほFG": "8411", "東京海上HD": "8766"},
+    "小売・サービス・飲食": {"ファーストリテイリング": "9983", "セブン＆アイ": "3382", "リクルートHD": "6098", "オリエンタルランド": "4661"},
+    "化学・医薬品": {"武田薬品": "4502", "中外製薬": "4519", "信越化学": "4063", "花王": "4452"}
 }
 
 # --- 2. 共通関数（分析ロジック） ---
-@st.cache_data(ttl=3600) # 1時間はデータを保持して高速化
+@st.cache_data(ttl=3600)
 def get_analysis(ticker_code):
     try:
         company = yf.Ticker(f"{ticker_code}.T")
         income = company.financials
         balance = company.balance_sheet
+        info = company.info
         if income.empty or balance.empty: return None
 
         def get_val(df, keys):
@@ -53,23 +43,26 @@ def get_analysis(ticker_code):
         y = rev_series.values
         trend = (LinearRegression().fit(X, y).coef_[0] / rev_series.mean() * 100)
         
+        # 人的資本データ
+        salary = info.get('averageWage') or info.get('averageSalary')
+        employees = info.get('fullTimeEmployees')
+
         scores = [max(0, min(100, op_margin * 5)), max(0, min(100, equity_ratio * 2)), max(0, min(100, 50 + trend * 5))]
-        return scores, op_margin, equity_ratio, trend
+        return scores, op_margin, equity_ratio, trend, salary, employees
     except:
         return None
 
-# --- 業界平均を計算する関数 ---
 @st.cache_data
 def get_industry_averages(industry_name):
     if industry_name not in INDUSTRY_MAP: return None
     comp_list = INDUSTRY_MAP[industry_name]
-    m_list, e_list, t_list = [], [], []
+    m_list, s_list, t_list = [], [], []
     for name, code in comp_list.items():
         res = get_analysis(code)
         if res:
-            m_list.append(res[1]); e_list.append(res[2]); t_list.append(res[3])
+            m_list.append(res[1]); s_list.append(res[2]); t_list.append(res[3])
     if not m_list: return None
-    return sum(m_list)/len(m_list), sum(e_list)/len(e_list), sum(t_list)/len(t_list)
+    return sum(m_list)/len(m_list), sum(s_list)/len(s_list), sum(t_list)/len(t_list)
 
 def select_company_ui(key_suffix):
     col_a, col_b = st.columns(2)
@@ -85,18 +78,16 @@ def select_company_ui(key_suffix):
     return code, name, industry
 
 # --- 3. メインUI ---
-st.title("🚀 企業分析ダッシュボード")
+st.title("🚀 企業分析 & 人的資本ダッシュボード")
 tab1, tab2 = st.tabs(["🔍 1社じっくり分析", "⚔️ ライバル比較"])
 
 with tab1:
-    st.subheader("分析する企業")
     t_code, t_name, t_ind = select_company_ui("single")
     if st.button("🔥 分析を実行", key="s_btn"):
         res = get_analysis(t_code)
-        ind_avg = get_industry_averages(t_ind) # 業界平均を取得
-        
+        ind_avg = get_industry_averages(t_ind)
         if res:
-            scores, margin, safety, trend = res
+            scores, margin, safety, trend, salary, emp = res
             col1, col2 = st.columns([1.5, 1])
             with col1:
                 fig = go.Figure(data=go.Scatterpolar(r=scores + [scores[0]], theta=['収益性','安全性','成長性','収益性'], fill='toself'))
@@ -109,20 +100,22 @@ with tab1:
                     st.metric("営業利益率", f"{margin:.1f}%", f"{margin - avg_m:.1f}%")
                     st.metric("自己資本比率", f"{safety:.1f}%", f"{safety - avg_s:.1f}%")
                     st.metric("成長トレンド", f"{trend:.1f}%", f"{trend - avg_t:.1f}%")
-                else:
-                    st.metric("営業利益率", f"{margin:.1f}%")
-                    st.metric("自己資本比率", f"{safety:.1f}%")
-                    st.metric("成長トレンド", f"{trend:.1f}%")
+                
+                st.divider()
+                st.write("#### 👥 人的資本データ")
+                if salary: st.metric("推定平均年収", f"約{salary:,.0f}円")
+                else: st.write("年収: データなし")
+                if emp: st.metric("従業員数", f"{emp:,.0f}名")
+                else: st.write("従業員数: データなし")
 
 with tab2:
-    st.subheader("比較する2社を選択")
     c1_code, c1_name, _ = select_company_ui("c1")
     c2_code, c2_name, _ = select_company_ui("c2")
     if st.button("⚔️ 比較を開始", key="c_btn"):
         res1, res2 = get_analysis(c1_code), get_analysis(c2_code)
         if res1 and res2:
-            s1, m1, sa1, tr1 = res1
-            s2, m2, sa2, tr2 = res2
+            s1, m1, sa1, tr1, sal1, e1 = res1
+            s2, m2, sa2, tr2, sal2, e2 = res2
             col_g, col_m = st.columns([1.5, 1])
             with col_g:
                 fig = go.Figure()
@@ -133,4 +126,4 @@ with tab2:
                 st.caption(f"※ {c1_name} を基準とした比較")
                 st.metric("利益率", f"{m1:.1f}%", f"{m1-m2:.1f}%")
                 st.metric("資本比率", f"{sa1:.1f}%", f"{sa1-sa2:.1f}%")
-                st.metric("成長率", f"{tr1:.1f}%", f"{tr1-tr2:.1f}%")
+                if sal1 and sal2: st.metric("推定年収差", f"約{sal1:,.0f}円", f"{sal1-sal2:,.0f}円")
