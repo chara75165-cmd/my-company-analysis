@@ -46,7 +46,6 @@ if st.button("分析開始"):
                             return df.loc[k]
                     return None
 
-                # 1. 収益性
                 rev_data = get_val(income_stmt, ['Total Revenue', 'Operating Revenue'])
                 op_inc_data = get_val(income_stmt, ['Operating Income', 'Pretax Income'])
 
@@ -57,7 +56,6 @@ if st.button("分析開始"):
                 else:
                     op_margin = 0
 
-                # 2. 安全性
                 equity_data = get_val(balance_sheet, ['Stockholders Equity', 'Total Equity'])
                 assets_data = get_val(balance_sheet, ['Total Assets'])
 
@@ -68,7 +66,6 @@ if st.button("分析開始"):
                 else:
                     equity_ratio = 0
 
-                # 3. 成長性
                 if rev_data is not None:
                     rev_series = rev_data.sort_index(ascending=True)
                     X = np.arange(len(rev_series)).reshape(-1, 1)
@@ -78,25 +75,41 @@ if st.button("分析開始"):
                 else:
                     trend_ratio = 0
 
-                # --- スコア化と表示 ---
-                scores = [
-                    max(0, min(100, op_margin * 5)),
-                    max(0, min(100, equity_ratio * 2)),
-                    max(0, min(100, 50 + trend_ratio * 5))
-                ]
+                # --- グラフ表示 ---
+                scores = [max(0, min(100, op_margin * 5)), max(0, min(100, equity_ratio * 2)), max(0, min(100, 50 + trend_ratio * 5))]
                 categories = ['収益性 (利益率)', '安全性 (比率)', '成長性 (トレンド)']
-
-                fig = go.Figure(data=go.Scatterpolar(
-                    r=scores + [scores[0]],
-                    theta=categories + [categories[0]],
-                    fill='toself'
-                ))
+                fig = go.Figure(data=go.Scatterpolar(r=scores + [scores[0]], theta=categories + [categories[0]], fill='toself'))
                 fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])))
                 st.plotly_chart(fig)
                 
-                st.success(f"分析完了: {ticker_input}")
-                st.write(f"現在の営業利益率: {op_margin:.1f}%")
-                st.write(f"自己資本比率: {equity_ratio:.1f}%")
+                # --- 🔍 追加した解説と診断セクション ---
+                st.divider()
+                st.subheader("🔍 指標の解説と診断結果")
+
+                with st.expander("各評価軸の概要を確認する"):
+                    st.write("""
+                    - **収益性**: 効率よく稼げているか。10%超で優良。
+                    - **安全性**: 倒産しにくさ。40%以上で安定。
+                    - **成長性**: 売上の伸び。プラスなら拡大中。
+                    """)
+
+                diagnosis = ""
+                advice = ""
+                if op_margin > 20 and equity_ratio > 40:
+                    diagnosis = "💎 高収益・盤石モデル"
+                    advice = "独自の強みがある超優良企業です。"
+                elif trend_ratio > 10:
+                    diagnosis = "🚀 積極成長型"
+                    advice = "勢いがあります。変化を楽しめる人向け。"
+                elif equity_ratio > 70:
+                    diagnosis = "🛡️ 鉄壁・超安定型"
+                    advice = "財務が非常に健全で、長く働ける環境です。"
+                else:
+                    diagnosis = "⚖️ バランス型"
+                    advice = "標準的な状況です。社風などを深掘りしましょう。"
+
+                st.info(f"**【総合診断】 {diagnosis}**")
+                st.success(f"**💡 就活アドバイス:** {advice}")
 
     except Exception as e:
         st.error(f"分析中にエラーが発生しました: {e}")
