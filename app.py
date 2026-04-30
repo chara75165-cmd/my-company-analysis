@@ -5,86 +5,84 @@ import plotly.graph_objects as go
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
-# ページ全体の設定（タイトルバーやレイアウト）
-st.set_page_config(page_title="企業分析ボード", layout="wide")
+st.set_page_config(page_title="ライバル比較ボード", layout="wide")
 
-# カスタムCSSでデザインをさらに凝る
+# カスタムCSS
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; }
-    .stButton>button { width: 100%; border-radius: 10px; height: 3em; background-color: #0068c9; color: white; }
-    .metric-card { background-color: white; padding: 15px; border-radius: 10px; box-shadow: 2px 2px 5px rgba(0,0,0,0.05); }
+    .stButton>button { width: 100%; border-radius: 10px; height: 3em; background-color: #e63946; color: white; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🚀 企業分析ダッシュボード")
+st.title("⚔️ ライバル企業・比較ダッシュボード")
 
-# --- 入力セクション（メイン画面の上部に配置） ---
 COMPANY_LIST = {
     "ソニーグループ": "6758", "トヨタ自動車": "7203", "任天堂": "7974",
-    "ソフトバンクG": "9984", "キーエンス": "6861", "三菱UFJ": "8306"
+    "ソフトバンクG": "9984", "キーエンス": "6861", "三菱UFJ": "8306", "パナソニック": "6752", "ホンダ": "7267"
 }
 
-col_in1, col_in2 = st.columns([2, 1])
+# --- 入力セクション（2社選択） ---
+col_in1, col_in2 = st.columns(2)
 with col_in1:
-    selected_company = st.selectbox("企業を選択", ["直接入力"] + list(COMPANY_LIST.keys()))
+    c1 = st.selectbox("比較企業 1", list(COMPANY_LIST.keys()), index=0)
 with col_in2:
-    if selected_company == "直接入力":
-        ticker_input = st.text_input("証券コード", "6758")
-    else:
-        ticker_input = COMPANY_LIST[selected_company]
+    c2 = st.selectbox("比較企業 2", list(COMPANY_LIST.keys()), index=1)
 
-# 分析開始ボタンを中央にドカンと配置
-if st.button("🔥 分析を実行する"):
-    ticker = f"{ticker_input}.T"
+if st.button("📊 2社を比較分析する"):
     try:
-        with st.spinner('データを解析中...'):
-            company = yf.Ticker(ticker)
-            income_stmt = company.financials
-            balance_sheet = company.balance_sheet
+        def get_analysis(ticker_code):
+            company = yf.Ticker(f"{ticker_code}.T")
+            income = company.financials
+            balance = company.balance_sheet
             
-            # --- 指標計算（鉄壁版を凝縮） ---
             def get_val(df, keys):
                 for k in keys:
                     if k in df.index: return df.loc[k]
                 return None
 
-            rev_data = get_val(income_stmt, ['Total Revenue', 'Operating Revenue'])
-            op_inc_data = get_val(income_stmt, ['Operating Income', 'Pretax Income'])
-            
-            # 各種計算（エラー回避込）
-            op_margin = (op_inc_data.iloc[0] / rev_data.iloc[0] * 100) if rev_data is not None else 0
-            
-            equity_data = get_val(balance_sheet, ['Stockholders Equity', 'Total Equity'])
-            assets_data = get_val(balance_sheet, ['Total Assets'])
-            equity_ratio = (equity_data.iloc[0] / assets_data.iloc[0] * 100) if equity_data is not None else 0
+            rev_data = get_val(income, ['Total Revenue', 'Operating Revenue'])
+            op_inc_data = get_val(income, ['Operating Income', 'Pretax Income'])
+            equity_data = get_val(balance, ['Stockholders Equity', 'Total Equity'])
+            assets_data = get_val(balance, ['Total Assets'])
+
+            # 指標計算
+            op_margin = (op_inc_data.iloc[0] / rev_data.iloc[0] * 100)
+            equity_ratio = (equity_data.iloc[0] / assets_data.iloc[0] * 100)
             
             rev_series = rev_data.sort_index(ascending=True)
             X = np.arange(len(rev_series)).reshape(-1, 1)
             y = rev_series.values
-            trend_ratio = (LinearRegression().fit(X, y).coef_[0] / rev_series.mean() * 100)
+            trend = (LinearRegression().fit(X, y).coef_[0] / rev_series.mean() * 100)
+            
+            return [max(0, min(100, op_margin * 5)), max(0, min(100, equity_ratio * 2)), max(0, min(100, 50 + trend * 5))], op_margin, equity_ratio, trend
+
+        with st.spinner('データを対照中...'):
+            scores1, margin1, safety1, trend1 = get_analysis(COMPANY_LIST[c1])
+            scores2, margin2, safety2, trend2 = get_analysis(COMPANY_LIST[c2])
 
             # --- メインレイアウト ---
             col_graph, col_stats = st.columns([1.5, 1])
             
+            categories = ['収益性', '安全性', '成長性']
+            
             with col_graph:
-                scores = [max(0, min(100, op_margin * 5)), max(0, min(100, equity_ratio * 2)), max(0, min(100, 50 + trend_ratio * 5))]
-                categories = ['収益性', '安全性', '成長性']
-                fig = go.Figure(data=go.Scatterpolar(r=scores + [scores[0]], theta=categories + [categories[0]], fill='toself', fillcolor='rgba(0, 104, 201, 0.2)', line=dict(color='#0068c9')))
-                fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), height=400, margin=dict(l=40, r=40, t=20, b=20))
+                fig = go.Figure()
+                # 企業1のグラフ
+                fig.add_trace(go.Scatterpolar(r=scores1 + [scores1[0]], theta=categories + [categories[0]], fill='toself', name=c1, line=dict(color='#0068c9')))
+                # 企業2のグラフ（色を変えて重ねる）
+                fig.add_trace(go.Scatterpolar(r=scores2 + [scores2[0]], theta=categories + [categories[0]], fill='toself', name=c2, line=dict(color='#e63946')))
+                
+                fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), height=450, margin=dict(l=50, r=50, t=20, b=20))
                 st.plotly_chart(fig, use_container_width=True)
 
             with col_stats:
-                st.write("#### 📊 経営指標")
-                st.metric("営業利益率", f"{op_margin:.1f}%")
-                st.metric("自己資本比率", f"{equity_ratio:.1f}%")
-                st.metric("成長トレンド", f"{trend_ratio:.1f}%")
-
-            # --- 診断セクション ---
-            st.divider()
-            diag = "💎 高収益・盤石型" if op_margin > 20 and equity_ratio > 40 else "🚀 成長優先型" if trend_ratio > 10 else "⚖️ バランス型"
-            st.info(f"### 総合診断: {diag}")
-            st.write(f"**就活アドバイス:** この企業は業界内でも{diag}の特徴が強く出ています。自分のキャリア観と照らし合わせてみましょう。")
+                st.write(f"#### 📈 数値比較")
+                # 2社の数値を並べて表示
+                st.write(f"**【{c1}】** vs **【{c2}】**")
+                st.metric(f"利益率", f"{margin1:.1f}%", f"{margin1-margin2:.1f}%" if margin1-margin2 > 0 else f"{margin1-margin2:.1f}%")
+                st.metric(f"資本比率", f"{safety1:.1f}%", f"{safety1-safety2:.1f}%")
+                st.metric(f"成長率", f"{trend1:.1f}%", f"{trend1-trend2:.1f}%")
 
     except Exception as e:
-        st.error(f"分析失敗: 証券コード {ticker_input} のデータを読み込めませんでした。({e})")
+        st.error(f"エラーが発生しました: {e}")
