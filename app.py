@@ -7,8 +7,30 @@ from sklearn.linear_model import LinearRegression
 
 st.title("就活・企業分析ダッシュボード")
 
-ticker_input = st.text_input("証券コードを入力（例: 6758）", "6758")
+# --- 企業名とコードの対応リスト（主要企業の例） ---
+# ここに自分の気になる企業をどんどん足していけます！
+COMPANY_LIST = {
+    "ソニーグループ": "6758",
+    "トヨタ自動車": "7203",
+    "任天堂": "7974",
+    "ソフトバンクグループ": "9984",
+    "キーエンス": "6861",
+    "ファーストリテイリング": "9983",
+    "リクルートHD": "6098",
+    "三菱UFJフィナンシャルG": "8306"
+}
+
+# 企業名を選択するか、直接コードを打てるようにする
+st.sidebar.header("企業選択")
+selected_company = st.sidebar.selectbox("主要企業から選ぶ", ["直接入力"] + list(COMPANY_LIST.keys()))
+
+if selected_company == "直接入力":
+    ticker_input = st.sidebar.text_input("証券コードを入力（4桁）", "6758")
+else:
+    ticker_input = COMPANY_LIST[selected_company]
+
 ticker = f"{ticker_input}.T"
+
 
 if st.button("分析開始"):
     try:
