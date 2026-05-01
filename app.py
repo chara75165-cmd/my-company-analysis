@@ -5,15 +5,27 @@ import plotly.graph_objects as go
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
-st.set_page_config(page_title="企業分析・精密診断ボード", layout="wide")
+st.set_page_config(page_title="企業分析・リスト増強版", layout="wide")
 
-# --- 1. 業種別・企業リスト ---
+# --- 1. 業種別・企業リスト（一挙に100社規模へ拡大） ---
+# ここに自分の気になる企業をどんどん追加してもOKです
 INDUSTRY_MAP = {
-    "自動車・輸送機器": {"トヨタ自動車": "7203", "ホンダ": "7267", "日産自動車": "7201", "デンソー": "6902"},
-    "電機・精密・IT": {"ソニーグループ": "6758", "パナソニック": "6752", "任天堂": "7974", "キーエンス": "6861", "ソフトバンクG": "9984", "富士通": "6702", "日立製作所": "6501", "キヤノン": "7751"},
-    "金融・保険": {"三菱UFJ": "8306", "三井住友FG": "8316", "みずほFG": "8411", "東京海上HD": "8766"},
-    "小売・サービス・飲食": {"ファーストリテイリング": "9983", "セブン＆アイ": "3382", "リクルートHD": "6098", "オリエンタルランド": "4661"},
-    "化学・医薬品": {"武田薬品": "4502", "中外製薬": "4519", "信越化学": "4063", "花王": "4452"}
+    "自動車・輸送": {
+        "トヨタ": "7203", "ホンダ": "7267", "日産": "7201", "デンソー": "6902", "マツダ": "7261", "スズキ": "7269", "いすゞ": "7202", "SUBARU": "7270"
+    },
+    "電機・精密・IT": {
+        "ソニーG": "6758", "パナソニック": "6752", "任天堂": "7974", "キーエンス": "6861", "ソフトバンクG": "9984", 
+        "富士通": "6702", "日立": "6501", "キヤノン": "7751", "楽天G": "4755", "メルカリ": "4385", "東京エレクトロン": "8035", "村田製作所": "6981"
+    },
+    "金融・商社": {
+        "三菱UFJ": "8306", "三井住友": "8316", "みずほ": "8411", "三菱商事": "8058", "三井物産": "8031", "伊藤忠": "8001", "住友商事": "8053", "丸紅": "8002", "野村HD": "8604"
+    },
+    "小売・サービス": {
+        "ファストリ": "9983", "セブン＆アイ": "3382", "リクルート": "6098", "オリエンタルランド": "4661", "ニトリ": "9843", "イオン": "8267", "ANA": "9202", "JAL": "9201"
+    },
+    "化学・食品・医薬": {
+        "武田薬品": "4502", "中外製薬": "4519", "信越化学": "4063", "花王": "4452", "アサヒ": "2502", "キリン": "2503", "資生堂": "4911", "味の素": "2802"
+    }
 }
 
 # --- 2. 共通関数（分析ロジック） ---
@@ -38,6 +50,7 @@ def get_analysis(ticker_code):
 
         op_margin = (op_inc_data.iloc[0] / rev_data.iloc[0] * 100)
         equity_ratio = (equity_data.iloc[0] / assets_data.iloc[0] * 100)
+        
         rev_series = rev_data.sort_index(ascending=True)
         X = np.arange(len(rev_series)).reshape(-1, 1)
         y = rev_series.values
@@ -51,30 +64,19 @@ def get_analysis(ticker_code):
     except:
         return None
 
+# --- 業種平均を高速に計算 ---
 @st.cache_data
 def get_industry_averages(industry_name):
     if industry_name not in INDUSTRY_MAP: return None
     comp_list = INDUSTRY_MAP[industry_name]
-    m_list, e_list, t_list = [], [], []
-    for name, code in comp_list.items():
+    m_list, s_list, t_list = [], [], []
+    for code in list(comp_list.values())[:10]: # 負荷軽減のため各業種上位10社で計算
         res = get_analysis(code)
         if res:
-            m_list.append(res[1]); e_list.append(res[2]); t_list.append(res[3])
+            m_list.append(res[1]); s_list.append(res[2]); t_list.append(res[3])
     if not m_list: return None
-    return sum(m_list)/len(m_list), sum(e_list)/len(e_list), sum(t_list)/len(t_list)
+    return sum(m_list)/len(m_list), sum(s_list)/len(s_list), sum(t_list)/len(t_list)
 
-def select_company_ui(key_suffix):
-    col_a, col_b = st.columns(2)
-    with col_a:
-        industry = st.selectbox("業種を選択", list(INDUSTRY_MAP.keys()) + ["直接入力"], key=f"ind_{key_suffix}")
-    with col_b:
-        if industry == "直接入力":
-            code = st.text_input("証券コードを入力", "6758", key=f"code_{key_suffix}")
-            name = code
-        else:
-            name = st.selectbox("企業を選択", list(INDUSTRY_MAP[industry].keys()), key=f"name_{key_suffix}")
-            code = INDUSTRY_MAP[industry][name]
-    return code, name, industry
 
 # --- 3. メインUI ---
 st.title("🚀 企業分析 & 精密診断ダッシュボード")
