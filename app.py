@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
-st.set_page_config(page_title="企業分析・人的資本ボード", layout="wide")
+st.set_page_config(page_title="企業分析・精密診断ボード", layout="wide")
 
 # --- 1. 業種別・企業リスト ---
 INDUSTRY_MAP = {
@@ -43,7 +43,6 @@ def get_analysis(ticker_code):
         y = rev_series.values
         trend = (LinearRegression().fit(X, y).coef_[0] / rev_series.mean() * 100)
         
-        # 人的資本データ
         salary = info.get('averageWage') or info.get('averageSalary')
         employees = info.get('fullTimeEmployees')
 
@@ -56,13 +55,13 @@ def get_analysis(ticker_code):
 def get_industry_averages(industry_name):
     if industry_name not in INDUSTRY_MAP: return None
     comp_list = INDUSTRY_MAP[industry_name]
-    m_list, s_list, t_list = [], [], []
+    m_list, e_list, t_list = [], [], []
     for name, code in comp_list.items():
         res = get_analysis(code)
         if res:
-            m_list.append(res[1]); s_list.append(res[2]); t_list.append(res[3])
+            m_list.append(res[1]); e_list.append(res[2]); t_list.append(res[3])
     if not m_list: return None
-    return sum(m_list)/len(m_list), sum(s_list)/len(s_list), sum(t_list)/len(t_list)
+    return sum(m_list)/len(m_list), sum(e_list)/len(e_list), sum(t_list)/len(t_list)
 
 def select_company_ui(key_suffix):
     col_a, col_b = st.columns(2)
@@ -78,7 +77,7 @@ def select_company_ui(key_suffix):
     return code, name, industry
 
 # --- 3. メインUI ---
-st.title("🚀 企業分析 & 人的資本ダッシュボード")
+st.title("🚀 企業分析 & 精密診断ダッシュボード")
 tab1, tab2 = st.tabs(["🔍 1社じっくり分析", "⚔️ ライバル比較"])
 
 with tab1:
@@ -101,12 +100,36 @@ with tab1:
                     st.metric("自己資本比率", f"{safety:.1f}%", f"{safety - avg_s:.1f}%")
                     st.metric("成長トレンド", f"{trend:.1f}%", f"{trend - avg_t:.1f}%")
                 
-                st.divider()
-                st.write("#### 👥 人的資本データ")
-                if salary: st.metric("推定平均年収", f"約{salary:,.0f}円")
-                else: st.write("年収: データなし")
-                if emp: st.metric("従業員数", f"{emp:,.0f}名")
-                else: st.write("従業員数: データなし")
+                with st.expander("📝 指標の解説を見る"):
+                    st.caption("**収益性**: 本業で稼ぐ効率。10%超で優良。")
+                    st.caption("**安全性**: 倒産リスク。40%以上で安定。")
+                    st.caption("**成長性**: 将来の勢い。プラスなら拡大中。")
+
+            st.divider()
+            # --- 精密診断ロジック ---
+            st.subheader("🧐 独自診断レポート")
+            diag_label, diag_comment = "分析中", ""
+            
+            if margin > 15 and safety > 60:
+                diag_label = "💎 ダイヤモンド・キャッシュカウ"
+                diag_comment = "極めて高い収益性と鉄壁の財務を両立。業界の支配者的な存在です。"
+            elif trend > 15 and margin > 5:
+                diag_label = "🚀 ライジング・スター"
+                diag_comment = "驚異的なスピードで急成長中。市場シェアを急速に奪っています。"
+            elif safety > 70 and trend < 0:
+                diag_label = "🏯 老舗の守護神"
+                diag_comment = "成長は落ち着いていますが、資産が豊富で非常に潰れにくい安定企業です。"
+            elif margin < 5 and trend > 10:
+                diag_label = "🏃 先行投資型スピードランナー"
+                diag_comment = "利益を削ってでも成長を優先。将来の化け方に期待のフェーズです。"
+            else:
+                diag_label = "⚖️ 堅実なバランスプレイヤー"
+                diag_comment = "業界標準を維持しつつ、着実に事業を継続している健康的な企業です。"
+
+            st.info(f"**診断タイプ: {diag_label}**")
+            st.write(f"**アドバイス:** {diag_comment}")
+
+            if salary: st.metric("推定平均年収", f"約{salary:,.0f}円")
 
 with tab2:
     c1_code, c1_name, _ = select_company_ui("c1")
