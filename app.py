@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
-st.set_page_config(page_title="企業分析・究極ボード", layout="wide")
+st.set_page_config(page_title="企業分析ダッシュボード", layout="wide")
 
 # --- 0. セッション状態の初期化 ---
 if 'fav_list' not in st.session_state:
@@ -48,7 +48,6 @@ def get_analysis(ticker_code):
         equity_data = get_val(balance, ['Stockholders Equity', 'Total Equity'])
         assets_data = get_val(balance, ['Total Assets'])
 
-        # データの最新値を抽出
         m = (op_inc_data.iloc[0] / rev_data.iloc[0] * 100)
         s = (equity_data.iloc[0] / assets_data.iloc[0] * 100)
         
@@ -154,11 +153,13 @@ with tab2:
                     fig_c = go.Figure()
                     fig_c.add_trace(go.Scatterpolar(r=s1+[s1[0]], theta=LABELS+[LABELS[0]], fill='toself', name=c1_n))
                     fig_c.add_trace(go.Scatterpolar(r=s2+[s2[0]], theta=LABELS+[LABELS[0]], fill='toself', name=c2_n))
+                    fig_c.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), height=450)
                     st.plotly_chart(fig_c, use_container_width=True)
                 with col_cm:
                     st.caption(f"※ {c1_n} 基準の差分")
                     st.metric(f"{LABEL_PROFIT}差", f"{m1:.1f}%", f"{m1-m2:.1f}%")
                     st.metric(f"{LABEL_SAFETY}差", f"{sa1:.1f}%", f"{sa1-sa2:.1f}%")
+                    st.metric(f"{LABEL_GROWTH}差", f"{tr1:.1f}%", f"{tr1-tr2:.1f}%")
 
 st.divider()
 st.subheader("⭐ 検討中リスト & ランキング")
