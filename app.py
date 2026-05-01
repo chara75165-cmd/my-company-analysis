@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
-st.set_page_config(page_title="企業分析ダッシュボード", layout="wide")
+st.set_page_config(page_title="企業分析・究極ボード", layout="wide")
 
 # --- 0. セッション状態の初期化 ---
 if 'fav_list' not in st.session_state:
@@ -13,7 +13,7 @@ if 'fav_list' not in st.session_state:
 if 'current_analysis' not in st.session_state:
     st.session_state.current_analysis = None
 
-# --- 名称の定義（ここで一括管理） ---
+# --- 名称の定義（統一） ---
 LABEL_PROFIT = "収益性（利益率）"
 LABEL_SAFETY = "安全性（資本比率）"
 LABEL_GROWTH = "成長性（トレンド）"
@@ -48,13 +48,14 @@ def get_analysis(ticker_code):
         equity_data = get_val(balance, ['Stockholders Equity', 'Total Equity'])
         assets_data = get_val(balance, ['Total Assets'])
 
-        m = (op_inc_data.iloc / rev_data.iloc * 100)
-        s = (equity_data.iloc / assets_data.iloc * 100)
+        # データの最新値を抽出
+        m = (op_inc_data.iloc[0] / rev_data.iloc[0] * 100)
+        s = (equity_data.iloc[0] / assets_data.iloc[0] * 100)
         
         rev_series = rev_data.sort_index(ascending=True)
         X = np.arange(len(rev_series)).reshape(-1, 1)
         y = rev_series.values
-        t = (LinearRegression().fit(X, y).coef_ / rev_series.mean() * 100)
+        t = (LinearRegression().fit(X, y).coef_[0] / rev_series.mean() * 100)
         
         salary = info.get('averageWage') or info.get('averageSalary')
         sc = [max(0, min(100, m * 5)), max(0, min(100, s * 2)), max(0, min(100, 50 + t * 5))]
@@ -92,9 +93,10 @@ tab1, tab2 = st.tabs(["🔍 1社分析", "⚔️ ライバル比較"])
 with tab1:
     t_code, t_name, t_ind = select_company_ui("single")
     if st.button("🔥 分析を実行", key="s_btn"):
-        res = get_analysis(t_code)
-        if res: st.session_state.current_analysis = {'name': t_name, 'res': res, 'ind': t_ind}
-        else: st.error("データを取得できませんでした。")
+        with st.spinner('データを取得中...'):
+            res = get_analysis(t_code)
+            if res: st.session_state.current_analysis = {'name': t_name, 'res': res, 'ind': t_ind}
+            else: st.error("データを取得できませんでした。")
 
     if st.session_state.current_analysis:
         curr = st.session_state.current_analysis
@@ -103,7 +105,7 @@ with tab1:
 
         col_g, col_v = st.columns([1.5, 1])
         with col_g:
-            fig = go.Figure(data=go.Scatterpolar(r=scores + [scores], theta=LABELS + [LABELS[0]], fill='toself'))
+            fig = go.Figure(data=go.Scatterpolar(r=scores + [scores[0]], theta=LABELS + [LABELS[0]], fill='toself'))
             fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), height=400)
             st.plotly_chart(fig, use_container_width=True)
         
@@ -117,8 +119,8 @@ with tab1:
             
             with st.expander("📝 指標の解説"):
                 st.caption(f"**{LABEL_PROFIT}**: 稼ぐ効率。10%超で優良。")
-                st.caption(f"**{LABEL_SAFETY}**: 倒れにくさ。40%以上で安定。")
-                st.caption(f"**{LABEL_GROWTH}**: 売上の伸び。プラスで拡大中。")
+                st.caption(f"**{LABEL_SAFETY}**: 会社の安全性。40%以上で安定。")
+                st.caption(f"**{LABEL_GROWTH}**: 売上の伸び。プラスなら拡大中。")
 
         st.divider()
         st.subheader("🧐 診断レポート")
@@ -143,19 +145,20 @@ with tab2:
     c1_c, c1_n, _ = select_company_ui("c1")
     c2_c, c2_n, _ = select_company_ui("c2")
     if st.button("⚔️ 比較を開始", key="c_btn"):
-        res1, res2 = get_analysis(c1_c), get_analysis(c2_c)
-        if res1 and res2:
-            s1, m1, sa1, tr1, _ = res1; s2, m2, sa2, tr2, _ = res2
-            col_cg, col_cm = st.columns([1.5, 1])
-            with col_cg:
-                fig_c = go.Figure()
-                fig_c.add_trace(go.Scatterpolar(r=s1+[s1], theta=LABELS+[LABELS[0]], fill='toself', name=c1_n))
-                fig_c.add_trace(go.Scatterpolar(r=s2+[s2], theta=LABELS+[LABELS[0]], fill='toself', name=c2_n))
-                st.plotly_chart(fig_c, use_container_width=True)
-            with col_cm:
-                st.caption(f"※ {c1_n} 基準の差分")
-                st.metric(f"{LABEL_PROFIT}差", f"{m1:.1f}%", f"{m1-m2:.1f}%")
-                st.metric(f"{LABEL_SAFETY}差", f"{sa1:.1f}%", f"{sa1-sa2:.1f}%")
+        with st.spinner('データを対照中...'):
+            res1, res2 = get_analysis(c1_c), get_analysis(c2_c)
+            if res1 and res2:
+                s1, m1, sa1, tr1, _ = res1; s2, m2, sa2, tr2, _ = res2
+                col_cg, col_cm = st.columns([1.5, 1])
+                with col_cg:
+                    fig_c = go.Figure()
+                    fig_c.add_trace(go.Scatterpolar(r=s1+[s1[0]], theta=LABELS+[LABELS[0]], fill='toself', name=c1_n))
+                    fig_c.add_trace(go.Scatterpolar(r=s2+[s2[0]], theta=LABELS+[LABELS[0]], fill='toself', name=c2_n))
+                    st.plotly_chart(fig_c, use_container_width=True)
+                with col_cm:
+                    st.caption(f"※ {c1_n} 基準の差分")
+                    st.metric(f"{LABEL_PROFIT}差", f"{m1:.1f}%", f"{m1-m2:.1f}%")
+                    st.metric(f"{LABEL_SAFETY}差", f"{sa1:.1f}%", f"{sa1-sa2:.1f}%")
 
 st.divider()
 st.subheader("⭐ 検討中リスト & ランキング")
