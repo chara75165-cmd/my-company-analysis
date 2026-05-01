@@ -153,11 +153,31 @@ with tab2:
                 st.metric("利益率差", f"{m1:.1f}%", f"{m1-m2:.1f}%")
                 st.metric("資本比率差", f"{sa1:.1f}%", f"{sa1-sa2:.1f}%")
 
+# --- 4. お気に入りリスト表示 & ランキング機能 ---
 st.divider()
-st.subheader("⭐ 検討中リスト")
+st.subheader("⭐ 検討中リスト & ランキング")
+
 if st.session_state.fav_list:
-    st.dataframe(pd.DataFrame(st.session_state.fav_list), use_container_width=True, hide_index=True)
-    if st.button("リストを消去"):
-        st.session_state.fav_list = []; st.rerun()
+    df_fav = pd.DataFrame(st.session_state.fav_list)
+    
+    # 文字列（%付き）を数値に変換して並び替えられるようにする
+    df_rank = df_fav.copy()
+    for col in ['利益率', '安全性', '成長性']:
+        df_rank[col] = df_rank[col].str.replace('%', '').astype(float)
+    
+    # 並び替えの操作
+    sort_key = st.radio("並び替えの基準を選んでください", ["登録順", "利益率", "安全性", "成長性"], horizontal=True)
+    
+    if sort_key != "登録順":
+        df_rank = df_rank.sort_values(by=sort_key, ascending=False)
+        st.write(f"🏆 **{sort_key}ランキング**")
+    
+    # ランキング順位を付けて表示
+    df_rank.index = np.arange(1, len(df_rank) + 1) # 1位, 2位...とする
+    st.table(df_rank)
+    
+    if st.button("リストをすべて消去"):
+        st.session_state.fav_list = []
+        st.rerun()
 else:
-    st.write("お気に入りはありません。")
+    st.write("お気に入りはありません。分析結果から「追加」してください。")
