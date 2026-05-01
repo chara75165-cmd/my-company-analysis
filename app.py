@@ -7,8 +7,7 @@ from sklearn.linear_model import LinearRegression
 
 st.set_page_config(page_title="企業分析・リスト増強版", layout="wide")
 
-# --- 1. 業種別・企業リスト（一挙に100社規模へ拡大） ---
-# ここに自分の気になる企業をどんどん追加してもOKです
+# --- 1. 業種別・企業リスト（一挙に拡大） ---
 INDUSTRY_MAP = {
     "自動車・輸送": {
         "トヨタ": "7203", "ホンダ": "7267", "日産": "7201", "デンソー": "6902", "マツダ": "7261", "スズキ": "7269", "いすゞ": "7202", "SUBARU": "7270"
@@ -64,22 +63,34 @@ def get_analysis(ticker_code):
     except:
         return None
 
-# --- 業種平均を高速に計算 ---
 @st.cache_data
 def get_industry_averages(industry_name):
     if industry_name not in INDUSTRY_MAP: return None
     comp_list = INDUSTRY_MAP[industry_name]
     m_list, s_list, t_list = [], [], []
-    for code in list(comp_list.values())[:10]: # 負荷軽減のため各業種上位10社で計算
+    # 負荷軽減のため各業種上位5社で計算
+    for code in list(comp_list.values())[:5]:
         res = get_analysis(code)
         if res:
             m_list.append(res[1]); s_list.append(res[2]); t_list.append(res[3])
     if not m_list: return None
     return sum(m_list)/len(m_list), sum(s_list)/len(s_list), sum(t_list)/len(t_list)
 
+def select_company_ui(key_suffix):
+    col_a, col_b = st.columns(2)
+    with col_a:
+        industry = st.selectbox("業種を選択", list(INDUSTRY_MAP.keys()) + ["直接入力"], key=f"ind_{key_suffix}")
+    with col_b:
+        if industry == "直接入力":
+            code = st.text_input("証券コードを入力", "6758", key=f"code_{key_suffix}")
+            name = code
+        else:
+            name = st.selectbox("企業を選択", list(INDUSTRY_MAP[industry].keys()), key=f"name_{key_suffix}")
+            code = INDUSTRY_MAP[industry][name]
+    return code, name, industry
 
 # --- 3. メインUI ---
-st.title("🚀 企業分析 & 精密診断ダッシュボード")
+st.title("🚀 企業分析 & リスト増強ダッシュボード")
 tab1, tab2 = st.tabs(["🔍 1社じっくり分析", "⚔️ ライバル比較"])
 
 with tab1:
@@ -108,32 +119,14 @@ with tab1:
                     st.caption("**成長性**: 将来の勢い。プラスなら拡大中。")
 
             st.divider()
-            # --- 精密診断ロジック ---
-            st.subheader("🧐 独自診断レポート")
-            diag_label, diag_comment = "分析中", ""
-            
-            if margin > 15 and safety > 60:
-                diag_label = "💎 ダイヤモンド・キャッシュカウ"
-                diag_comment = "極めて高い収益性と鉄壁の財務を両立。業界の支配者的な存在です。"
-            elif trend > 15 and margin > 5:
-                diag_label = "🚀 ライジング・スター"
-                diag_comment = "驚異的なスピードで急成長中。市場シェアを急速に奪っています。"
-            elif safety > 70 and trend < 0:
-                diag_label = "🏯 老舗の守護神"
-                diag_comment = "成長は落ち着いていますが、資産が豊富で非常に潰れにくい安定企業です。"
-            elif margin < 5 and trend > 10:
-                diag_label = "🏃 先行投資型スピードランナー"
-                diag_comment = "利益を削ってでも成長を優先。将来の化け方に期待のフェーズです。"
-            else:
-                diag_label = "⚖️ 堅実なバランスプレイヤー"
-                diag_comment = "業界標準を維持しつつ、着実に事業を継続している健康的な企業です。"
-
-            st.info(f"**診断タイプ: {diag_label}**")
-            st.write(f"**アドバイス:** {diag_comment}")
-
+            # 診断ロジック
+            diag_label = "💎 ダイヤモンド型" if margin > 15 and safety > 60 else "🚀 成長型" if trend > 10 else "⚖️ バランス型"
+            st.info(f"**診断結果: {diag_label}**")
             if salary: st.metric("推定平均年収", f"約{salary:,.0f}円")
+            if emp: st.write(f"従業員数: {emp:,.0f}名")
 
 with tab2:
+    st.subheader("比較する2社を選択")
     c1_code, c1_name, _ = select_company_ui("c1")
     c2_code, c2_name, _ = select_company_ui("c2")
     if st.button("⚔️ 比較を開始", key="c_btn"):
@@ -151,4 +144,4 @@ with tab2:
                 st.caption(f"※ {c1_name} を基準とした比較")
                 st.metric("利益率", f"{m1:.1f}%", f"{m1-m2:.1f}%")
                 st.metric("資本比率", f"{sa1:.1f}%", f"{sa1-sa2:.1f}%")
-                if sal1 and sal2: st.metric("推定年収差", f"約{sal1:,.0f}円", f"{sal1-sal2:,.0f}円")
+                if sal1 and sal2: st.metric("年収差", f"約{sal1:,.0f}円", f"{sal1-sal2:,.0f}円")
