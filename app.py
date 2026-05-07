@@ -9,185 +9,126 @@ from sklearn.linear_model import LinearRegression
 # --- ページ設定 ---
 st.set_page_config(page_title="プロフェッショナル企業分析ボード", layout="wide")
 
-# --- 0. セッション状態の初期化 ---
-if 'fav_list' not in st.session_state:
-    st.session_state.fav_list = []
-
-# --- 名称の定義 ---
-LABEL_PROFIT = "収益性（営業利益率）"
-LABEL_SAFETY = "安全性（自己資本比率）"
-LABEL_GROWTH = "成長性（売上トレンド）"
-LABELS = [LABEL_PROFIT, LABEL_SAFETY, LABEL_GROWTH]
-
-INDUSTRY_MAP = {
-    "自動車・輸送": {"トヨタ": "7203", "ホンダ": "7267", "日産": "7201", "デンソー": "6902"},
-    "電機・精密・IT": {"ソニーG": "6758", "パナソニック": "6752", "任天堂": "7974", "キーエンス": "6861"},
-    "金融・商社": {"三菱UFJ": "8306", "三井住友": "8316", "三菱商事": "8058", "伊藤忠": "8001"},
-    "小売・サービス": {"ファストリ": "9983", "セブン＆アイ": "3382", "リクルート": "6098", "オリエンタルランド": "4661"},
-    "化学・食品・医薬": {"武田薬品": "4502", "中外製薬": "4519", "信越化学": "4063", "花王": "4452"}
-}
-
 # --- 共通関数 ---
+def get_safe_value(df, keywords):
+    """データフレームのインデックスからキーワードに合致する行を抽出（大文字小文字無視）"""
+    if df is None or df.empty:
+        return pd.Series()
+    
+    # インデックスを小文字にして照合
+    idx_lower = [str(i).lower().replace(" ", "") for i in df.index]
+    for kw in keywords:
+        kw_clean = kw.lower().replace(" ", "")
+        if kw_clean in idx_lower:
+            target_idx = idx_lower.index(kw_clean)
+            return df.iloc[target_idx]
+    return pd.Series()
+
 @st.cache_data(ttl=3600)
 def get_full_analysis(ticker_code):
     try:
-        # 日本株の場合は .T を付与
         full_code = f"{ticker_code}.T" if not ticker_code.endswith(".T") else ticker_code
         company = yf.Ticker(full_code)
         
+        # 通期データ取得を試みる
         income = company.financials
         balance = company.balance_sheet
         info = company.info
         
+        # 通期が空なら四半期データを試す
+        if income.empty:
+            income = company.quarterly_financials
+        if balance.empty:
+            balance = company.quarterly_balance_sheet
+            
         if income.empty or balance.empty:
-            return None
+            return {"error": "財務諸表データがサーバーから取得できませんでした。"}
 
-        # データの欠損を0で埋める
+        # 数値データのクレンジング
         income = income.fillna(0)
         balance = balance.fillna(0)
 
-        def get_val(df, keys):
-            for k in keys:
-                if k in df.index:
-                    return df.loc[k]
-            return pd.Series([0] * len(df.columns), index=df.columns)
-
-        # 基本データ抽出
-        rev = get_val(income, ['Total Revenue', 'Operating Revenue', 'Total Operating Profit'])
-        op_inc = get_val(income, ['Operating Income', 'Pretax Income', 'Normalized Income'])
-        net_inc = get_val(income, ['Net Income Common Stockholders', 'Net Income', 'Net Income From Continuing Operation Net Minority Interest'])
-        equity = get_val(balance, ['Stockholders Equity', 'Total Equity', 'Common Stock Equity'])
-        assets = get_val(balance, ['Total Assets'])
+        # 柔軟なキーワード検索でデータを抽出
+        rev = get_safe_value(income, ['Total Revenue', 'Operating Revenue', 'Revenue'])
+        op_inc = get_safe_value(income, ['Operating Income', 'Operating Profit', 'Pretax Income'])
+        net_inc = get_safe_value(income, ['Net Income', 'Net Income Common Stockholders'])
+        equity = get_safe_value(balance, ['Stockholders Equity', 'Total Equity', 'Common Stock Equity'])
+        assets = get_safe_value(balance, ['Total Assets'])
         
-        if rev.iloc[0] == 0: return None
+        if rev.empty or rev.iloc[0] == 0:
+            return {"error": "売上高データが取得できません。"}
 
         # 指標計算
-        m = (op_inc.iloc[0] / rev.iloc[0] * 100)
-        s = (equity.iloc[0] / assets.iloc[0] * 100)
-        roe = (net_inc.iloc[0] / equity.iloc[0] * 100) if equity.iloc[0] != 0 else 0
+        margin = (op_inc.iloc[0] / rev.iloc[0] * 100) if not op_inc.empty else 0
+        safety = (equity.iloc[0] / assets.iloc[0] * 100) if not equity.empty else 0
+        roe = (net_inc.iloc[0] / equity.iloc[0] * 100) if (not net_inc.empty and not equity.empty and equity.iloc[0] != 0) else 0
         
-        # 成長性トレンド（線形回帰）
-        rev_s = rev.replace(0, np.nan).dropna().sort_index()
+        # 成長性（トレンド）
+        rev_s = rev.sort_index()
         if len(rev_s) > 1:
             X = np.arange(len(rev_s)).reshape(-1, 1)
-            t = (LinearRegression().fit(X, rev_s.values).coef_[0] / rev_s.mean() * 100)
+            trend = (LinearRegression().fit(X, rev_s.values).coef_[0] / rev_s.mean() * 100)
         else:
-            t = 0
+            trend = 0
 
         # スコア化 (0-100)
-        sc = [
-            max(0, min(100, m * 5)), 
-            max(0, min(100, s * 2)), 
-            max(0, min(100, 50 + t * 5))
+        scores = [
+            max(0, min(100, margin * 5)), 
+            max(0, min(100, safety * 2)), 
+            max(0, min(100, 50 + trend * 5))
         ]
         
         return {
-            "scores": sc, "margin": m, "safety": s, "trend": t, "roe": roe,
+            "scores": scores, "margin": margin, "safety": safety, "trend": trend, "roe": roe,
             "info": info, "rev_history": rev_s, "op_inc_history": op_inc.sort_index(),
             "income_df": income, "balance_df": balance
         }
     except Exception as e:
-        print(f"Error analyzing {ticker_code}: {e}")
-        return None
+        return {"error": f"システムエラー: {str(e)}"}
 
-# --- UIパーツ ---
-def draw_performance_chart(data):
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
-    # 日付形式をきれいに
-    x_axis = [d.strftime('%Y-%m') if hasattr(d, 'strftime') else str(d) for d in data['rev_history'].index]
-    
-    fig.add_trace(go.Bar(x=x_axis, y=data['rev_history'].values, name="売上高", marker_color='royalblue'), secondary_y=False)
-    fig.add_trace(go.Scatter(x=x_axis, y=data['op_inc_history'].values, name="営業利益", line=dict(color='firebrick', width=3)), secondary_y=True)
-    fig.update_layout(title_text="業績推移（売上・利益）", hovermode="x unified", height=350)
-    st.plotly_chart(fig, use_container_width=True)
+# --- メイン UI ---
+st.sidebar.title("🔍 企業分析設定")
+ind_list = {
+    "自動車": "7203", "IT/電機": "6758", "商社": "8058", "小売": "9983", "ゲーム": "7974"
+}
+selected_ind = st.sidebar.selectbox("サンプル企業", list(ind_list.keys()))
+t_code = st.sidebar.text_input("証券コード (日本株)", ind_list[selected_ind])
 
-# --- サイドバー ---
-with st.sidebar:
-    st.title("⚙️ 設定・銘柄選択")
-    ind = st.selectbox("業種を選択", list(INDUSTRY_MAP.keys()) + ["直接入力"])
-    if ind == "直接入力":
-        t_code = st.text_input("証券コード (例: 7203)", "6758")
-        t_name = t_code
-    else:
-        t_name = st.selectbox("企業を選択", list(INDUSTRY_MAP[ind].keys()))
-        t_code = INDUSTRY_MAP[ind][t_name]
-    
-    analyze_btn = st.button("🚀 分析を実行", use_container_width=True)
-    
-    st.divider()
-    if st.session_state.fav_list:
-        st.subheader("⭐ お気に入り")
-        fav_df = pd.DataFrame(st.session_state.fav_list)
-        st.dataframe(fav_df[['企業名']], hide_index=True)
-        if st.button("リスト消去"):
-            st.session_state.fav_list = []; st.rerun()
-
-# --- メインコンテンツ ---
-st.title("📊 企業分析ダッシュボード Pro")
-
-# 分析実行
-res = None
-if analyze_btn:
-    with st.spinner(f'{t_name} のデータを取得中...'):
+if st.sidebar.button("分析実行"):
+    with st.spinner("データ取得中..."):
         res = get_full_analysis(t_code)
-        if res:
-            st.session_state.last_analysis = res
-            st.session_state.last_name = t_name
-        else:
-            st.error("データの取得に失敗しました。証券コードが正しいか、または財務データが公開されているか確認してください。")
-
-# 結果表示
-if 'last_analysis' in st.session_state:
-    res = st.session_state.last_analysis
-    t_name = st.session_state.last_name
-    
-    tab1, tab2, tab3 = st.tabs(["🧐 総合診断", "📈 財務推移", "📋 財務諸表"])
-    
-    with tab1:
-        col1, col2 = st.columns([1, 1])
-        with col1:
-            fig_radar = go.Figure(data=go.Scatterpolar(r=res['scores'] + [res['scores'][0]], theta=LABELS + [LABELS[0]], fill='toself'))
-            fig_radar.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), height=400)
-            st.plotly_chart(fig_radar, use_container_width=True)
         
-        with col2:
-            st.subheader(f"✨ {t_name} の主要指標")
-            c1, c2 = st.columns(2)
-            c1.metric(LABEL_PROFIT, f"{res['margin']:.1f}%")
-            c2.metric(LABEL_SAFETY, f"{res['safety']:.1f}%")
-            c1.metric(LABEL_GROWTH, f"{res['trend']:.1f}%")
-            c2.metric("効率性 (ROE)", f"{res['roe']:.1f}%")
-            
-            st.divider()
-            st.write("**💰 市場評価 (バリュエーション)**")
-            v1, v2, v3 = st.columns(3)
-            # infoから取得する際の安全な取り方
-            per = res['info'].get('trailingPE')
-            pbr = res['info'].get('priceToBook')
-            div = res['info'].get('dividendYield', 0)
-            
-            v1.metric("PER", f"{per:.1f}倍" if per else "-")
-            v2.metric("PBR", f"{pbr:.1f}倍" if pbr else "-")
-            v3.metric("配当利回り", f"{div*100:.2f}%" if div else "0.00%")
-
-        st.divider()
-        if res['margin'] > 12:
-            st.success("**診断: 💎 高収益企業** - 効率的に利益を生み出せています。")
+        if "error" in res:
+            st.error(res["error"])
+            st.info("Yahoo Financeのデータ制限により、一時的に取得できない場合があります。時間を置くか別のコードを試してください。")
         else:
-            st.info("**診断: ⚖️ 標準的経営** - 安定した財務状況です。")
+            st.title(f"📊 {t_code} 分析レポート")
+            
+            # 指標の表示
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("営業利益率", f"{res['margin']:.1f}%")
+            c2.metric("自己資本比率", f"{res['safety']:.1f}%")
+            c3.metric("成長性トレンド", f"{res['trend']:.1f}%")
+            c4.metric("ROE", f"{res['roe']:.1f}%")
+            
+            # チャート表示
+            col_a, col_b = st.columns([1, 1])
+            with col_a:
+                labels = ["収益性", "安全性", "成長性"]
+                fig = go.Figure(data=go.Scatterpolar(r=res['scores'] + [res['scores'][0]], theta=labels + [labels[0]], fill='toself'))
+                fig.update_layout(polar=dict(radialaxis=dict(visible=True, range=[0, 100])), title="スコア分析")
+                st.plotly_chart(fig, use_container_width=True)
+            
+            with col_b:
+                fig2 = make_subplots(specs=[[{"secondary_y": True}]])
+                fig2.add_trace(go.Bar(x=res['rev_history'].index.astype(str), y=res['rev_history'].values, name="売上"), secondary_y=False)
+                fig2.add_trace(go.Scatter(x=res['op_inc_history'].index.astype(str), y=res['op_inc_history'].values, name="利益"), secondary_y=True)
+                fig2.update_layout(title="業績推移")
+                st.plotly_chart(fig2, use_container_width=True)
+            
+            with st.expander("財務諸表の生データを確認"):
+                st.write("損益計算書")
+                st.dataframe(res['income_df'])
 
-        if st.button("⭐ お気に入りに追加"):
-            if not any(f['企業名'] == t_name for f in st.session_state.fav_list):
-                st.session_state.fav_list.append({'企業名': t_name, '利益率': f"{res['margin']:.1f}%"})
-                st.toast(f"{t_name}を保存しました")
-
-    with tab2:
-        draw_performance_chart(res)
-
-    with tab3:
-        st.write("### 損益計算書")
-        st.dataframe(res['income_df'])
-        st.write("### 貸借対照表")
-        st.dataframe(res['balance_df'])
 else:
-    st.write("左側のメニューから企業を選んで「分析を実行」を押してください。")
+    st.write("左のサイドバーから「分析実行」を押してください。")
