@@ -33,34 +33,57 @@ INDUSTRY_MAP = {
 def get_analysis(ticker_code):
     try:
         company = yf.Ticker(f"{ticker_code}.T")
+        
+        # 1. 財務諸表を取得（通期が空なら四半期を試す）
         income = company.financials
+        if income.empty:
+            income = company.quarterly_financials
+            
         balance = company.balance_sheet
+        if balance.empty:
+            balance = company.quarterly_balance_sheet
+            
         info = company.info
-        if income.empty or balance.empty: return None
-
-        def get_val(df, keys):
-            for k in keys:
-                if k in df.index: return df.loc[k]
+        if income.empty or balance.empty:
             return None
 
-        rev_data = get_val(income, ['Total Revenue', 'Operating Revenue'])
-        op_inc_data = get_val(income, ['Operating Income', 'Pretax Income'])
-        equity_data = get_val(balance, ['Stockholders Equity', 'Total Equity'])
-        assets_data = get_val(balance, ['Total Assets'])
+        # 2. 複数のキーワードでデータを探す補助関数
+        def get_val_flexible(df, keywords):
+            # インデックスをすべて小文字にして比較しやすくする
+            idx_map = {str(k).lower().replace(" ", ""): k for k in df.index}
+            for kw in keywords:
+                kw_clean = kw.lower().replace(" ", "")
+                if kw_clean in idx_map:
+                    return df.loc[idx_map[kw_clean]]
+            return pd.Series([np.nan] * len(df.columns), index=df.columns)
+
+        # 3. データの抽出
+        rev_data = get_val_flexible(income, ['Total Revenue', 'totalRevenue', 'Operating Revenue'])
+        op_inc_data = get_val_flexible(income, ['Operating Income', 'operatingIncome', 'Pretax Income'])
+        equity_data = get_val_flexible(balance, ['Stockholders Equity', 'totalStockholdersEquity', 'Total Equity'])
+        assets_data = get_val_flexible(balance, ['Total Assets', 'totalAssets'])
+
+        # 4. 計算（データが1つでも欠けていたらNone）
+        if rev_data.isna().all() or op_inc_data.isna().all():
+            return None
 
         m = (op_inc_data.iloc[0] / rev_data.iloc[0] * 100)
         s = (equity_data.iloc[0] / assets_data.iloc[0] * 100)
         
-        rev_series = rev_data.sort_index(ascending=True)
-        X = np.arange(len(rev_series)).reshape(-1, 1)
-        y = rev_series.values
-        t = (LinearRegression().fit(X, y).coef_[0] / rev_series.mean() * 100)
+        rev_series = rev_data.dropna().sort_index(ascending=True)
+        if len(rev_series) > 1:
+            X = np.arange(len(rev_series)).reshape(-1, 1)
+            y = rev_series.values
+            t = (LinearRegression().fit(X, y).coef_[0] / rev_series.mean() * 100)
+        else:
+            t = 0
         
         salary = info.get('averageWage') or info.get('averageSalary')
         sc = [max(0, min(100, m * 5)), max(0, min(100, s * 2)), max(0, min(100, 50 + t * 5))]
         return sc, m, s, t, salary
-    except: return None
-
+    except Exception as e:
+        # st.error(f"詳細エラー: {e}") # デバッグ用
+        return None
 @st.cache_data
 def get_industry_averages(ind_name):
     if ind_name not in INDUSTRY_MAP: return None
