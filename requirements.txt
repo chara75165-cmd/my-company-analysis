@@ -1,4 +1,2 @@
-yfinance
-pandas
-plotly
-scikit-learn
+streamlit
+yfinance>=0.2.40
